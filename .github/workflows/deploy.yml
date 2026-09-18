@@ -1,0 +1,90 @@
+name: Build and Deploy Website
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: mywebsite
+  ECR_REGISTRY: 126309364316.dkr.ecr.us-east-1.amazonaws.com
+  IMAGE_TAG: latest
+  EC2_INSTANCE_ID: i-0676aba6ad436f492
+
+jobs:
+  build-and-deploy:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # 1. Download the GitHub repository
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Authenticate GitHub Actions with AWS using OIDC
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::126309364316:role/github-mywebsite3-deploy-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      # 3. Login to Amazon ECR
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # 4. Build Docker image
+      - name: Build Docker image
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+
+      # 5. Push Docker image to ECR
+      - name: Push Docker image to ECR
+        run: |
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+      # 6. Deploy the new image to EC2 using SSM
+      - name: Deploy to EC2
+        run: |
+
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$EC2_INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --comment "Deploy mywebsite3 application" \
+            --parameters 'commands=[
+              "aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 126309364316.dkr.ecr.us-east-1.amazonaws.com",
+              "docker pull 126309364316.dkr.ecr.us-east-1.amazonaws.com/mywebsite:latest",
+              "docker stop mywebsite3-container || true",
+              "docker rm mywebsite3-container || true",
+              "docker run -d --name mywebsite3-container --restart unless-stopped -p 80:80 126309364316.dkr.ecr.us-east-1.amazonaws.com/mywebsite:latest"
+            ]' \
+            --region "$AWS_REGION" \
+            --query "Command.CommandId" \
+            --output text)
+
+          echo "SSM Command ID: $COMMAND_ID"
+
+          echo "Waiting for deployment..."
+
+          aws ssm wait command-executed \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$EC2_INSTANCE_ID"
+
+          echo "Deployment completed successfully."
+
+      # 7. Show running containers
+      - name: Verify deployment
+        run: |
+          aws ssm send-command \
+            --instance-ids "$EC2_INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=[
+              "docker ps",
+              "docker images | head"
+            ]' \
+            --region "$AWS_REGION"
