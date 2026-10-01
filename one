@@ -1,0 +1,3 @@
+git add Jenkinsfile
+git commit -m "Deploy exact Jenkins build"
+git push origin main
