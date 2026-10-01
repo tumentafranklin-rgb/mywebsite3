@@ -1,0 +1,7 @@
+.git
+.gitignore
+.github
+Jenkinsfile
+Dockerfile.txt
+README.md
+*.md
