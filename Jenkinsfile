@@ -96,7 +96,7 @@ pipeline {
 
     post {
         always {
-            docker rm -f mywebsite3-test || true
+            sh 'docker rm -f mywebsite3-test || true'
         }
     }
 }
