@@ -10,6 +10,7 @@ pipeline {
         stage('Checkout') {
             steps {
                 echo 'Checking out source code...'
+
                 checkout scm
             }
         }
@@ -64,6 +65,7 @@ pipeline {
                             --password-stdin
 
                         docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}
+
                         docker push ${DOCKER_IMAGE}:latest
 
                         docker logout
@@ -181,9 +183,47 @@ pipeline {
                 '''
             }
         }
+
+        stage('Docker Cleanup') {
+            steps {
+                echo 'Cleaning up old Docker images...'
+
+                sh '''
+                    echo "======================================"
+                    echo "DOCKER IMAGE CLEANUP"
+                    echo "======================================"
+
+                    CURRENT_IMAGE=$(docker inspect \
+                        --format='{{.Config.Image}}' \
+                        mywebsite3-container)
+
+                    echo "Current production image:"
+                    echo "$CURRENT_IMAGE"
+
+                    echo ""
+                    echo "Images before cleanup:"
+                    docker images ${DOCKER_IMAGE}
+
+                    echo ""
+                    echo "Removing unused Docker images..."
+
+                    docker image prune -f
+
+                    echo ""
+                    echo "Images after cleanup:"
+                    docker images ${DOCKER_IMAGE}
+
+                    echo ""
+                    echo "======================================"
+                    echo "CLEANUP COMPLETED"
+                    echo "======================================"
+                '''
+            }
+        }
     }
 
     post {
+
         always {
             echo 'Cleaning up test container...'
 
