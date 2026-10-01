@@ -71,6 +71,28 @@ pipeline {
                 }
             }
         }
+
+        stage('Deploy to Azure') {
+            steps {
+                echo 'Deploying website to Azure...'
+
+                sh '''
+                    docker pull ${DOCKER_IMAGE}:latest
+
+                    docker rm -f mywebsite3-container || true
+
+                    docker run -d \
+                        --name mywebsite3-container \
+                        -p 80:80 \
+                        --restart unless-stopped \
+                        ${DOCKER_IMAGE}:latest
+
+                    sleep 5
+
+                    curl -f http://localhost
+                '''
+            }
+        }
     }
 
     post {
