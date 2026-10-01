@@ -57,6 +57,7 @@ pipeline {
                         passwordVariable: 'DOCKER_PASSWORD'
                     )
                 ]) {
+
                     sh '''
                         echo "$DOCKER_PASSWORD" | docker login \
                             --username "$DOCKER_USERNAME" \
@@ -76,9 +77,33 @@ pipeline {
                 echo "Deploying build ${BUILD_NUMBER} to Azure..."
 
                 sh '''
+                    set -e
+
+                    echo "======================================"
+                    echo "Finding currently running version..."
+                    echo "======================================"
+
+                    PREVIOUS_IMAGE=$(docker inspect \
+                        --format='{{.Config.Image}}' \
+                        mywebsite3-container 2>/dev/null || true)
+
+                    echo "Previous image: ${PREVIOUS_IMAGE}"
+
+                    echo "======================================"
+                    echo "Pulling new image..."
+                    echo "======================================"
+
                     docker pull ${DOCKER_IMAGE}:${BUILD_NUMBER}
 
+                    echo "======================================"
+                    echo "Stopping current website..."
+                    echo "======================================"
+
                     docker rm -f mywebsite3-container || true
+
+                    echo "======================================"
+                    echo "Starting new website..."
+                    echo "======================================"
 
                     docker run -d \
                         --name mywebsite3-container \
@@ -86,9 +111,73 @@ pipeline {
                         --restart unless-stopped \
                         ${DOCKER_IMAGE}:${BUILD_NUMBER}
 
+                    echo "Waiting for website..."
                     sleep 5
 
-                    curl -f http://localhost
+                    echo "======================================"
+                    echo "Running health check..."
+                    echo "======================================"
+
+                    if curl -f http://localhost; then
+
+                        echo "======================================"
+                        echo "DEPLOYMENT SUCCESSFUL"
+                        echo "Build ${BUILD_NUMBER} is healthy."
+                        echo "======================================"
+
+                    else
+
+                        echo "======================================"
+                        echo "DEPLOYMENT FAILED"
+                        echo "Starting rollback..."
+                        echo "======================================"
+
+                        docker rm -f mywebsite3-container || true
+
+                        if [ -n "$PREVIOUS_IMAGE" ]; then
+
+                            echo "Restoring previous image:"
+                            echo "${PREVIOUS_IMAGE}"
+
+                            docker run -d \
+                                --name mywebsite3-container \
+                                -p 80:80 \
+                                --restart unless-stopped \
+                                ${PREVIOUS_IMAGE}
+
+                            echo "Waiting for rollback..."
+                            sleep 5
+
+                            echo "Checking restored website..."
+
+                            if curl -f http://localhost; then
+
+                                echo "======================================"
+                                echo "ROLLBACK SUCCESSFUL"
+                                echo "Previous version restored."
+                                echo "======================================"
+
+                            else
+
+                                echo "======================================"
+                                echo "ROLLBACK FAILED"
+                                echo "======================================"
+
+                                exit 1
+                            fi
+
+                        else
+
+                            echo "======================================"
+                            echo "NO PREVIOUS IMAGE FOUND"
+                            echo "Cannot perform rollback."
+                            echo "======================================"
+
+                            exit 1
+                        fi
+
+                        exit 1
+                    fi
                 '''
             }
         }
@@ -96,7 +185,24 @@ pipeline {
 
     post {
         always {
-            sh 'docker rm -f mywebsite3-test || true'
+            echo 'Cleaning up test container...'
+
+            sh '''
+                docker rm -f mywebsite3-test || true
+            '''
+        }
+
+        success {
+            echo '======================================'
+            echo 'PIPELINE COMPLETED SUCCESSFULLY'
+            echo '======================================'
+        }
+
+        failure {
+            echo '======================================'
+            echo 'PIPELINE FAILED'
+            echo 'Check the Jenkins console log.'
+            echo '======================================'
         }
     }
 }
