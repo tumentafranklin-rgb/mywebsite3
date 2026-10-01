@@ -186,11 +186,13 @@ pipeline {
 
         stage('Docker Cleanup') {
             steps {
-                echo 'Cleaning up old Docker images...'
+                echo 'Removing old Docker image versions...'
 
                 sh '''
+                    set -e
+
                     echo "======================================"
-                    echo "DOCKER IMAGE CLEANUP"
+                    echo "SAFE DOCKER CLEANUP"
                     echo "======================================"
 
                     CURRENT_IMAGE=$(docker inspect \
@@ -201,11 +203,47 @@ pipeline {
                     echo "$CURRENT_IMAGE"
 
                     echo ""
+                    echo "Finding previous image..."
+
+                    PREVIOUS_IMAGE=$(docker images \
+                        ${DOCKER_IMAGE} \
+                        --format '{{.Repository}}:{{.Tag}}' \
+                        | grep -E "^${DOCKER_IMAGE}:[0-9]+$" \
+                        | grep -v ":${BUILD_NUMBER}$" \
+                        | sort -t: -k2,2nr \
+                        | head -1 || true)
+
+                    echo "Previous rollback image:"
+                    echo "${PREVIOUS_IMAGE:-NONE}"
+
+                    echo ""
                     echo "Images before cleanup:"
                     docker images ${DOCKER_IMAGE}
 
                     echo ""
-                    echo "Removing unused Docker images..."
+                    echo "Removing old numbered images..."
+
+                    for IMAGE in $(docker images \
+                        ${DOCKER_IMAGE} \
+                        --format '{{.Repository}}:{{.Tag}}' \
+                        | grep -E "^${DOCKER_IMAGE}:[0-9]+$" || true)
+                    do
+
+                        if [ "$IMAGE" = "$CURRENT_IMAGE" ]; then
+                            echo "KEEPING current image: $IMAGE"
+
+                        elif [ -n "$PREVIOUS_IMAGE" ] && [ "$IMAGE" = "$PREVIOUS_IMAGE" ]; then
+                            echo "KEEPING rollback image: $IMAGE"
+
+                        else
+                            echo "REMOVING old image: $IMAGE"
+                            docker rmi "$IMAGE" || true
+                        fi
+
+                    done
+
+                    echo ""
+                    echo "Removing dangling images..."
 
                     docker image prune -f
 
@@ -215,7 +253,7 @@ pipeline {
 
                     echo ""
                     echo "======================================"
-                    echo "CLEANUP COMPLETED"
+                    echo "SAFE CLEANUP COMPLETED"
                     echo "======================================"
                 '''
             }
